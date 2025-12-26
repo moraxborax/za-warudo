@@ -1,0 +1,5 @@
+.npm-cache
+.vite
+node_modules/
+.env
+dist/
