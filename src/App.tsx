@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Timer = {
   id: string;
@@ -58,36 +58,6 @@ const translations = {
 
 type Language = keyof typeof translations;
 
-type PersistedState = {
-  timers: Timer[];
-  lastUpdatedMs: number;
-  language?: Language;
-};
-
-const loadPersistedState = (now: number) => {
-  if (typeof window === "undefined") {
-    return { timers: [], language: "en" as Language };
-  }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { timers: [], language: "en" as Language };
-    const parsed: PersistedState = JSON.parse(raw);
-    const elapsed = Math.max(0, now - (parsed.lastUpdatedMs ?? now));
-    const timers = (parsed.timers ?? []).map((timer) => {
-      if (!timer.isRunning || timer.remainingMs <= 0) {
-        return { ...timer, remainingMs: Math.max(0, timer.remainingMs), isRunning: false };
-      }
-      const remainingMs = Math.max(0, timer.remainingMs - elapsed);
-      return { ...timer, remainingMs, isRunning: remainingMs > 0 };
-    });
-    const language = parsed.language ?? "en";
-    return { timers, language };
-  } catch (error) {
-    console.error("Failed to load timers from storage", error);
-    return { timers: [], language: "en" as Language };
-  }
-};
-
 const formatTime = (ms: number) => {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600)
@@ -101,76 +71,93 @@ const formatTime = (ms: number) => {
 };
 
 const initialDurationMinutes = 60;
-const STORAGE_KEY = "multi-break-timers";
+const API_BASE =
+  import.meta.env.VITE_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
+
+type ApiTimer = {
+  id: string;
+  name: string;
+  duration_ms: number;
+  remaining_ms: number;
+  is_running: boolean;
+};
 
 function App() {
-  const now = typeof window !== "undefined" ? Date.now() : 0;
-  const persisted = loadPersistedState(now);
-  const [timers, setTimers] = useState<Timer[]>(persisted.timers);
+  const [timers, setTimers] = useState<Timer[]>([]);
   const [nameInput, setNameInput] = useState("");
   const [durationMinutes, setDurationMinutes] = useState(initialDurationMinutes);
-  const [language, setLanguage] = useState<Language>(persisted.language);
-  const lastTickRef = useRef(now);
+  const [language, setLanguage] = useState<Language>("en");
+  const [error, setError] = useState<string | null>(null);
   const t = translations[language];
-  lastTickRef.current = now;
+
+  const refreshTimers = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/timers`);
+      if (!response.ok) throw new Error(`Failed to fetch timers: ${response.status}`);
+      const data: ApiTimer[] = await response.json();
+      setTimers((prev) => {
+        const selectedIds = new Set(prev.filter((t) => t.isSelected).map((t) => t.id));
+        return data.map((timer) => ({
+          id: timer.id,
+          name: timer.name,
+          durationMs: timer.duration_ms,
+          remainingMs: timer.remaining_ms,
+          isRunning: timer.is_running,
+          isSelected: selectedIds.has(timer.id),
+        }));
+      });
+      setError(null);
+    } catch (error) {
+      console.error("Failed to refresh timers", error);
+      setError("Failed to sync with server. Is the backend running?");
+    }
+  };
 
   useEffect(() => {
+    refreshTimers();
     const interval = window.setInterval(() => {
-      const now = Date.now();
-      const delta = now - lastTickRef.current;
-      lastTickRef.current = now;
-
-      setTimers((prev) =>
-        prev.map((timer) => {
-          if (!timer.isRunning || timer.remainingMs <= 0) {
-            if (timer.remainingMs <= 0 && timer.isRunning) {
-              return { ...timer, remainingMs: 0, isRunning: false };
-            }
-            return timer;
-          }
-          const remainingMs = Math.max(0, timer.remainingMs - delta);
-          return {
-            ...timer,
-            remainingMs,
-            isRunning: remainingMs > 0,
-          };
-        }),
-      );
+      refreshTimers();
     }, 1000);
-
     return () => window.clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const payload: PersistedState = {
-      timers,
-      lastUpdatedMs: Date.now(),
-      language,
-    };
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch (error) {
-      console.error("Failed to persist timers", error);
+  const sendJson = async (path: string, body: unknown, method: "POST" | "PATCH" = "POST") => {
+    const response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Request failed: ${response.status} ${text}`);
     }
-  }, [timers, language]);
+  };
 
-  const addTimer = () => {
+  const addTimer = async () => {
     const cleanName = nameInput.trim();
     if (!cleanName) return;
     const durationMs = Math.max(1, durationMinutes) * 60 * 1000;
-    const newTimer: Timer = {
-      id: crypto.randomUUID
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2),
-      name: cleanName,
-      durationMs,
-      remainingMs: durationMs,
-      isRunning: false,
-      isSelected: false,
-    };
-    setTimers((prev) => [...prev, newTimer]);
-    setNameInput("");
+    try {
+      await sendJson("/timers", { name: cleanName, duration_ms: durationMs });
+      setNameInput("");
+      await refreshTimers();
+    } catch (error) {
+      console.error("Failed to add timer", error);
+      setError("Failed to add timer. Check backend logs.");
+    }
+  };
+
+  const performAction = async (
+    action: "start" | "pause" | "reset" | "delete",
+    ids?: string[],
+  ) => {
+    try {
+      await sendJson("/timers/actions", { action, ids });
+      await refreshTimers();
+    } catch (error) {
+      console.error(`Failed to ${action} timers`, error);
+      setError(`Failed to ${action} timers. Check backend logs.`);
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -181,64 +168,27 @@ function App() {
     );
   };
 
-  const removeTimer = (id: string) => {
-    setTimers((prev) => prev.filter((timer) => timer.id !== id));
-  };
+  const selectedIds = timers.filter((t) => t.isSelected).map((t) => t.id);
 
-  const removeSelected = () => {
-    setTimers((prev) => prev.filter((timer) => !timer.isSelected));
-  };
+  const removeTimer = (id: string) => performAction("delete", [id]);
 
-  const startSelected = () => {
-    lastTickRef.current = Date.now();
-    setTimers((prev) =>
-      prev.map((timer) =>
-        timer.isSelected && timer.remainingMs > 0
-          ? { ...timer, isRunning: true }
-          : timer,
-      ),
-    );
-  };
+  const removeSelected = () => performAction("delete", selectedIds);
 
-  const startAll = () => {
-    lastTickRef.current = Date.now();
-    setTimers((prev) =>
-      prev.map((timer) =>
-        timer.remainingMs > 0 ? { ...timer, isRunning: true } : timer,
-      ),
-    );
-  };
+  const startSelected = () => performAction("start", selectedIds);
 
-  const pauseSelected = () => {
-    setTimers((prev) =>
-      prev.map((timer) =>
-        timer.isSelected ? { ...timer, isRunning: false } : timer,
-      ),
-    );
-  };
+  const startAll = () => performAction("start");
 
-  const pauseAll = () => {
-    setTimers((prev) => prev.map((timer) => ({ ...timer, isRunning: false })));
-  };
+  const pauseSelected = () => performAction("pause", selectedIds);
 
-  const resetSelected = () => {
-    setTimers((prev) =>
-      prev.map((timer) =>
-        timer.isSelected
-          ? {
-              ...timer,
-              remainingMs: timer.durationMs,
-              isRunning: false,
-            }
-          : timer,
-      ),
-    );
-  };
+  const pauseAll = () => performAction("pause");
+
+  const resetSelected = () => performAction("reset", selectedIds);
 
   const hasSelection = timers.some((t) => t.isSelected);
 
   return (
     <div className="page">
+      {error && <div className="error-banner">{error}</div>}
       <header className="panel header-panel">
         <div className="header-top">
           <h1>{t.title}</h1>
@@ -337,13 +287,7 @@ function App() {
                 <div className="card-actions">
                   <button
                     onClick={() =>
-                      setTimers((prev) =>
-                        prev.map((t) =>
-                          t.id === timer.id
-                            ? { ...t, isRunning: !t.isRunning }
-                            : t,
-                        ),
-                      )
+                      performAction(timer.isRunning ? "pause" : "start", [timer.id])
                     }
                     disabled={timer.remainingMs <= 0}
                   >
