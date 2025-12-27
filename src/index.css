@@ -60,7 +60,8 @@ label {
   color: #1e293b;
 }
 
-input {
+input,
+select {
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid #cbd5e1;
@@ -112,6 +113,22 @@ button:disabled {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.language-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #475569;
 }
 
 .list {

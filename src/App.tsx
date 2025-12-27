@@ -14,6 +14,55 @@ type PersistedState = {
   lastUpdatedMs: number;
 };
 
+const translations = {
+  en: {
+    title: "Break Timer",
+    subtitle: "Manage multiple countdowns for quiz or event breaks.",
+    nameLabel: "Name",
+    namePlaceholder: "Person or team",
+    durationLabel: "Duration (minutes)",
+    addEntry: "Add entry",
+    startSelected: "Start selected",
+    pauseSelected: "Pause selected",
+    resetSelected: "Reset selected",
+    removeSelected: "Remove selected",
+    startAll: "Start all",
+    pauseAll: "Pause all",
+    noTimers: "No timers yet. Add a person to get started.",
+    select: "Select",
+    statusRunning: "Running",
+    statusPaused: "Paused",
+    start: "Start",
+    pause: "Pause",
+    remove: "Remove",
+    language: "Language",
+  },
+  zh: {
+    title: "休息计时器",
+    subtitle: "管理测验或活动休息的多个倒计时。",
+    nameLabel: "名称",
+    namePlaceholder: "参与者或队伍",
+    durationLabel: "时长（分钟）",
+    addEntry: "添加计时",
+    startSelected: "开始所选",
+    pauseSelected: "暂停所选",
+    resetSelected: "重置所选",
+    removeSelected: "删除所选",
+    startAll: "开始全部",
+    pauseAll: "暂停全部",
+    noTimers: "还没有计时器。添加一个人开始吧。",
+    select: "选择",
+    statusRunning: "进行中",
+    statusPaused: "已暂停",
+    start: "开始",
+    pause: "暂停",
+    remove: "删除",
+    language: "语言",
+  },
+} as const;
+
+type Language = keyof typeof translations;
+
 const formatTime = (ms: number) => {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600)
@@ -33,8 +82,10 @@ function App() {
   const [timers, setTimers] = useState<Timer[]>([]);
   const [nameInput, setNameInput] = useState("");
   const [durationMinutes, setDurationMinutes] = useState(initialDurationMinutes);
+  const [language, setLanguage] = useState<Language>("en");
   const lastTickRef = useRef(Date.now());
   const [hydrated, setHydrated] = useState(false);
+  const t = translations[language];
 
   useEffect(() => {
     try {
@@ -179,26 +230,37 @@ function App() {
 
   return (
     <div className="page">
-      <header className="panel">
-        <h1>Break Timer</h1>
-        <p className="subtitle">
-          Manage multiple countdowns for quiz or event breaks.
-        </p>
+      <header className="panel header-panel">
+        <div className="header-top">
+          <h1>{t.title}</h1>
+          <label className="language-switch" htmlFor="language">
+            <span>{t.language}</span>
+            <select
+              id="language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as Language)}
+            >
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+            </select>
+          </label>
+        </div>
+        <p className="subtitle">{t.subtitle}</p>
       </header>
 
       <section className="panel form-panel">
         <div className="field">
-          <label htmlFor="name">Name</label>
+          <label htmlFor="name">{t.nameLabel}</label>
           <input
             id="name"
             type="text"
-            placeholder="Person or team"
+            placeholder={t.namePlaceholder}
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
           />
         </div>
         <div className="field">
-          <label htmlFor="duration">Duration (minutes)</label>
+          <label htmlFor="duration">{t.durationLabel}</label>
           <input
             id="duration"
             type="number"
@@ -208,38 +270,38 @@ function App() {
           />
         </div>
         <button className="primary" onClick={addTimer}>
-          Add entry
+          {t.addEntry}
         </button>
       </section>
 
       <section className="panel controls">
         <div className="controls-group">
           <button onClick={startSelected} disabled={!hasSelection}>
-            Start selected
+            {t.startSelected}
           </button>
           <button onClick={pauseSelected} disabled={!hasSelection}>
-            Pause selected
+            {t.pauseSelected}
           </button>
           <button onClick={resetSelected} disabled={!hasSelection}>
-            Reset selected
+            {t.resetSelected}
           </button>
           <button onClick={removeSelected} disabled={!hasSelection}>
-            Remove selected
+            {t.removeSelected}
           </button>
         </div>
         <div className="controls-group">
           <button onClick={startAll} disabled={timers.length === 0}>
-            Start all
+            {t.startAll}
           </button>
           <button onClick={pauseAll} disabled={timers.length === 0}>
-            Pause all
+            {t.pauseAll}
           </button>
         </div>
       </section>
 
       <section className="panel list">
         {timers.length === 0 ? (
-          <p className="muted">No timers yet. Add a person to get started.</p>
+          <p className="muted">{t.noTimers}</p>
         ) : (
           timers.map((timer) => (
             <article key={timer.id} className="card">
@@ -249,7 +311,7 @@ function App() {
                   checked={timer.isSelected}
                   onChange={() => toggleSelect(timer.id)}
                 />
-                <span>Select</span>
+                <span>{t.select}</span>
               </label>
               <div className="card-body">
                 <div className="card-header">
@@ -259,7 +321,7 @@ function App() {
                       timer.isRunning ? "pill-running" : "pill-paused"
                     }`}
                   >
-                    {timer.isRunning ? "Running" : "Paused"}
+                    {timer.isRunning ? t.statusRunning : t.statusPaused}
                   </span>
                 </div>
                 <div className="time">{formatTime(timer.remainingMs)}</div>
@@ -276,9 +338,11 @@ function App() {
                     }
                     disabled={timer.remainingMs <= 0}
                   >
-                    {timer.isRunning ? "Pause" : "Start"}
+                    {timer.isRunning ? t.pause : t.start}
                   </button>
-                  <button onClick={() => removeTimer(timer.id)}>Remove</button>
+                  <button onClick={() => removeTimer(timer.id)}>
+                    {t.remove}
+                  </button>
                 </div>
               </div>
             </article>
