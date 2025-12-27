@@ -9,11 +9,6 @@ type Timer = {
   isSelected: boolean;
 };
 
-type PersistedState = {
-  timers: Timer[];
-  lastUpdatedMs: number;
-};
-
 const translations = {
   en: {
     title: "Break Timer",
@@ -63,6 +58,36 @@ const translations = {
 
 type Language = keyof typeof translations;
 
+type PersistedState = {
+  timers: Timer[];
+  lastUpdatedMs: number;
+  language?: Language;
+};
+
+const loadPersistedState = (now: number) => {
+  if (typeof window === "undefined") {
+    return { timers: [], language: "en" as Language };
+  }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { timers: [], language: "en" as Language };
+    const parsed: PersistedState = JSON.parse(raw);
+    const elapsed = Math.max(0, now - (parsed.lastUpdatedMs ?? now));
+    const timers = (parsed.timers ?? []).map((timer) => {
+      if (!timer.isRunning || timer.remainingMs <= 0) {
+        return { ...timer, remainingMs: Math.max(0, timer.remainingMs), isRunning: false };
+      }
+      const remainingMs = Math.max(0, timer.remainingMs - elapsed);
+      return { ...timer, remainingMs, isRunning: remainingMs > 0 };
+    });
+    const language = parsed.language ?? "en";
+    return { timers, language };
+  } catch (error) {
+    console.error("Failed to load timers from storage", error);
+    return { timers: [], language: "en" as Language };
+  }
+};
+
 const formatTime = (ms: number) => {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600)
@@ -79,32 +104,15 @@ const initialDurationMinutes = 60;
 const STORAGE_KEY = "multi-break-timers";
 
 function App() {
-  const [timers, setTimers] = useState<Timer[]>([]);
+  const now = typeof window !== "undefined" ? Date.now() : 0;
+  const persisted = loadPersistedState(now);
+  const [timers, setTimers] = useState<Timer[]>(persisted.timers);
   const [nameInput, setNameInput] = useState("");
   const [durationMinutes, setDurationMinutes] = useState(initialDurationMinutes);
-  const [language, setLanguage] = useState<Language>("en");
-  const lastTickRef = useRef(Date.now());
-  const [hydrated, setHydrated] = useState(false);
+  const [language, setLanguage] = useState<Language>(persisted.language);
+  const lastTickRef = useRef(now);
   const t = translations[language];
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed: PersistedState = JSON.parse(raw);
-      const elapsed = Math.max(0, Date.now() - parsed.lastUpdatedMs);
-      const adjusted = parsed.timers.map((timer) => {
-        if (!timer.isRunning || timer.remainingMs <= 0) return timer;
-        const remainingMs = Math.max(0, timer.remainingMs - elapsed);
-        return { ...timer, remainingMs, isRunning: remainingMs > 0 };
-      });
-      setTimers(adjusted);
-      lastTickRef.current = Date.now();
-    } catch (error) {
-      console.error("Failed to load timers from storage", error);
-    }
-    setHydrated(true);
-  }, []);
+  lastTickRef.current = now;
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -134,17 +142,18 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (typeof window === "undefined") return;
     const payload: PersistedState = {
       timers,
       lastUpdatedMs: Date.now(),
+      language,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
       console.error("Failed to persist timers", error);
     }
-  }, [timers, hydrated]);
+  }, [timers, language]);
 
   const addTimer = () => {
     const cleanName = nameInput.trim();
